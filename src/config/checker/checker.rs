@@ -69,6 +69,7 @@ fn process_when_rule(
                         model::OutputSetFixed::new(action.target, value),
                     )),
                 },
+                model::Action::Log => result.push(model::Action::Log)
             }
         }
 
@@ -81,6 +82,9 @@ fn process_when_rule(
         Vec::<model::Action<model::OutputSetGeneric>>::with_capacity(rule.actions.len());
     for action in rule.actions {
         match action {
+	    ast::WhenAction::Log => {
+		actions.push(model::Action::Log)
+	    }
             ast::WhenAction::OutputSet(action) => {
                 let output = sym_table.require_type::<SymbolOutput>(&action.target_output)?;
                 actions.push(model::Action::OutputSet(model::OutputSetGeneric::new(

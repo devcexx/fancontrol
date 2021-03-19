@@ -121,11 +121,18 @@ impl RunContext {
 		println!("Cannot find device {}", &target.device.name)
 	    }
 	}
+
+	fn print_log(sensor: &OnlineSensor) {
+	    println!("Value of {} is currently: {}",
+		     &sensor.symbol.name,
+		     sensor.read_cached())
+	}
 	
 	match rule.rule {
 	    cmodel::When::Unbounded(when) => {
 		for action in &when.actions {
 		    match action {
+			cmodel::Action::Log => print_log(&rule.sensor),
 		        cmodel::Action::OutputSet(action) =>
 			    apply(self, rule, &action.target, action.value)
 		    }
@@ -134,6 +141,7 @@ impl RunContext {
 	    cmodel::When::Bounded(when) => {
 		for action in &when.actions {
 		    match action {
+			cmodel::Action::Log => print_log(&rule.sensor),
 		        cmodel::Action::OutputSet(action) => {
 			    match action.value {
 				ast::OutputValue::Between(lo, hi) => {
@@ -171,6 +179,7 @@ DEFINE OUTPUT `aio_pump`
         INDEX 1;
 
 WHEN `aio_liquid_temp` BETWEEN 10 AND 50 DO
+   LOG;
    SET `aio_pump` BETWEEN 0% AND 50%;
 END
 

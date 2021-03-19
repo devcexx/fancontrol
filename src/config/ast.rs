@@ -59,6 +59,7 @@ pub struct WhenActionOutputSet {
 
 #[derive(Clone)]
 pub enum WhenAction {
+    Log,
     OutputSet(WhenActionOutputSet),
 }
 
@@ -66,7 +67,8 @@ impl Debug for WhenAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WhenAction::OutputSet(set) => set.fmt(f),
-        }
+            WhenAction::Log => write!(f, "Log")
+	}
     }
 }
 

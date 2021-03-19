@@ -34,6 +34,7 @@ pub WhenActionStmt: ast::WhenAction = {
 }
 
 pub WhenAction: ast::WhenAction = {
+    "LOG" => ast::WhenAction::Log,
     "SET" <Ident> <WhenOutputValue> => ast::WhenAction::OutputSet(ast::WhenActionOutputSet::new(<>))
 }
 

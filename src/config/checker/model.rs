@@ -38,6 +38,7 @@ pub struct OutputSetGeneric {
 
 #[derive(Debug)]
 pub enum Action<A: std::fmt::Debug> {
+    Log,
     OutputSet(A),
 }
 
