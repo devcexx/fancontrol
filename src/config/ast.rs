@@ -67,8 +67,8 @@ impl Debug for WhenAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WhenAction::OutputSet(set) => set.fmt(f),
-            WhenAction::Log => write!(f, "Log")
-	}
+            WhenAction::Log => write!(f, "Log"),
+        }
     }
 }
 

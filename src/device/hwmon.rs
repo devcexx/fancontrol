@@ -1,5 +1,6 @@
 use std::error::Error;
 
+use log::debug;
 use udev::Device as UdevDevice;
 
 pub struct HwmonGenericDevice {
@@ -35,17 +36,17 @@ impl HwmonGenericDevice {
 
     pub fn set_pwm_enable(&self, num: u8, enable: &str) {
         let attr_enable = Self::pwm_enable_attr(num);
-	let path = self.device.syspath().join(attr_enable);
-	println!("Writing '{}' into '{:?}'", enable, path);
-//	std::fs::write(&path, format!("{}\n", enable)).unwrap();
+        let path = self.device.syspath().join(attr_enable);
+        debug!("Writing '{}' into '{:?}'", enable, path);
+        //	std::fs::write(&path, format!("{}\n", enable)).unwrap();
     }
 
     pub fn set_pwm_enable_and_value(&self, num: u8, enable: &str, value: &str) {
-	self.set_pwm_enable(num, enable);
+        self.set_pwm_enable(num, enable);
         let attr_value = Self::pwm_attr(num);
-	let path = self.device.syspath().join(attr_value);
-	println!("Writing '{}' into '{:?}'", value, path);
-//	std::fs::write(&path, format!("{}\n", value)).unwrap();
+        let path = self.device.syspath().join(attr_value);
+        debug!("Writing '{}' into '{:?}'", value, path);
+        //	std::fs::write(&path, format!("{}\n", value)).unwrap();
     }
 
     fn read_attr(&self, name: &str) -> std::io::Result<String> {

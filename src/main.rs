@@ -1,13 +1,15 @@
 #[macro_use]
 extern crate derive_new;
 
+use log::{info, warn};
+
 mod config;
 mod device;
 
 use std::cell::RefCell;
 
-use config::{SymbolDevice, SymbolOutput, SymbolSensor, ast, checker::model as cmodel};
-use device::{Device, HwmonGenericDevice, Nct6775Device, PwmMode, udev_find_with_tags};
+use config::{ast, checker::model as cmodel, SymbolDevice, SymbolOutput, SymbolSensor};
+use device::{udev_find_with_tags, Device, HwmonGenericDevice, Nct6775Device, PwmMode};
 
 #[macro_use]
 extern crate lalrpop_util;
@@ -77,15 +79,18 @@ struct RunContext {
     pub thermal_program: cmodel::ThermalProgram,
     pub online_devices: Vec<Box<dyn Device>>,
 }
- 
+
 impl RunContext {
     pub fn find_device<'prog>(&'prog self, name: &str) -> Option<&'prog Box<dyn Device>> {
         self.online_devices
             .iter()
             .find(|device| device.name() == name)
     }
-    
-    pub fn find_device_mut<'prog>(&'prog mut self, name: &str) -> Option<&'prog mut Box<dyn Device>> {
+
+    pub fn find_device_mut<'prog>(
+        &'prog mut self,
+        name: &str,
+    ) -> Option<&'prog mut Box<dyn Device>> {
         self.online_devices
             .iter_mut()
             .find(|device| device.name() == name)
@@ -114,57 +119,73 @@ impl RunContext {
     }
 
     pub fn apply_rule(&self, rule: &OnlineThermalRule) {
-	fn apply(context: &RunContext, rule: &OnlineThermalRule, target: &SymbolOutput, value: i32) {
-	    if let Some(device) = context.find_device(&target.device.name) {
-		device.pwm_set(target.index as u8, PwmMode::Manual(((value as f64) * 255.0 / 100.0) as u8))
-	    } else {
-		println!("Cannot find device {}", &target.device.name)
-	    }
-	}
+        fn apply(
+            context: &RunContext,
+            rule: &OnlineThermalRule,
+            target: &SymbolOutput,
+            value: i32,
+        ) {
+            if let Some(device) = context.find_device(&target.device.name) {
+                device.pwm_set(
+                    target.index as u8,
+                    PwmMode::Manual(((value as f64) * 255.0 / 100.0) as u8),
+                )
+            } else {
+                warn!(
+                    "Couldn't completely apply rule: Cannot find device `{}`",
+                    &target.device.name
+                );
+            }
+        }
 
-	fn print_log(sensor: &OnlineSensor) {
-	    println!("Value of {} is currently: {}",
-		     &sensor.symbol.name,
-		     sensor.read_cached())
-	}
-	
-	match rule.rule {
-	    cmodel::When::Unbounded(when) => {
-		for action in &when.actions {
-		    match action {
-			cmodel::Action::Log => print_log(&rule.sensor),
-		        cmodel::Action::OutputSet(action) =>
-			    apply(self, rule, &action.target, action.value)
-		    }
-		}
-	    }
-	    cmodel::When::Bounded(when) => {
-		for action in &when.actions {
-		    match action {
-			cmodel::Action::Log => print_log(&rule.sensor),
-		        cmodel::Action::OutputSet(action) => {
-			    match action.value {
-				ast::OutputValue::Between(lo, hi) => {
-				    let sensor_value = rule.sensor.read_cached() as f64;
-				    let maxval = when.max_value as f64;
-				    let minval = when.min_value as f64;
-				    let progress = (sensor_value - minval) / (maxval - minval);
+        fn print_log(sensor: &OnlineSensor) {
+            info!(
+                "Value of {} is currently: {}",
+                &sensor.symbol.name,
+                sensor.read_cached()
+            );
+        }
 
-				    let output_per = lo + (progress * (hi as f64 - lo as f64)) as i32;
-				    apply(self, rule, &action.target, output_per);
-				}
-				ast::OutputValue::Fixed(value) =>
-				    apply(self, rule, &action.target, value)
-			    }
-			}
-		    }
-		}
-	    }
-	}
+        match rule.rule {
+            cmodel::When::Unbounded(when) => {
+                for action in &when.actions {
+                    match action {
+                        cmodel::Action::Log => print_log(&rule.sensor),
+                        cmodel::Action::OutputSet(action) => {
+                            apply(self, rule, &action.target, action.value)
+                        }
+                    }
+                }
+            }
+            cmodel::When::Bounded(when) => {
+                for action in &when.actions {
+                    match action {
+                        cmodel::Action::Log => print_log(&rule.sensor),
+                        cmodel::Action::OutputSet(action) => match action.value {
+                            ast::OutputValue::Between(lo, hi) => {
+                                let sensor_value = rule.sensor.read_cached() as f64;
+                                let maxval = when.max_value as f64;
+                                let minval = when.min_value as f64;
+                                let progress = (sensor_value - minval) / (maxval - minval);
+
+                                let output_per = lo + (progress * (hi as f64 - lo as f64)) as i32;
+                                apply(self, rule, &action.target, output_per);
+                            }
+                            ast::OutputValue::Fixed(value) => {
+                                apply(self, rule, &action.target, value)
+                            }
+                        },
+                    }
+                }
+            }
+        }
     }
 }
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    info!("Initializing fan control...");
+
     let input = r#"
 DEFINE DEVICE `aio` UDEV TAG "fancontrol_aio" DRIVER "nct6775";
 
@@ -200,14 +221,19 @@ END
         .into_iter()
         .filter_map(|device| match udev_find_with_tags(vec![&device.tag]) {
             Some(udev_dev) => {
+                info!(
+                    "Found device `{}` at {:?}",
+                    device.name,
+                    &udev_dev.devpath()
+                );
                 let hwmon_dev = HwmonGenericDevice::from_udev(udev_dev);
                 let device = create_device(&device.driver, device.name.clone(), hwmon_dev);
                 Some(device)
             }
 
             None => {
-                println!(
-                    "Device not found: `{}` (no device with udev tag '{}' found.)",
+                warn!(
+                    "Device not found: `{}`. Ignoring. (no device with udev tag '{}' found.)",
                     device.name, device.tag
                 );
                 None
@@ -216,16 +242,14 @@ END
         .collect::<Vec<Box<dyn Device>>>();
 
     let context: RunContext = RunContext::new(program, devices);
-    println!("{:#?}", context.online_devices);
-
     loop {
         let online_rules = context.get_online_rules();
-	for rule in &online_rules {
-	    if rule.is_triggered() {
-		context.apply_rule(&rule);
-	    }
-	}
-	
+        for rule in &online_rules {
+            if rule.is_triggered() {
+                context.apply_rule(&rule);
+            }
+        }
+
         std::thread::sleep_ms(1000);
     }
 }
