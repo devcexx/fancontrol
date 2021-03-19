@@ -1,0 +1,16 @@
+[package]
+name = "fancontrol"
+version = "0.1.0"
+authors = ["Roberto Guillén"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies] # <-- We added this and everything after!
+lalrpop = { version = "0.19", features = ["lexer"] }
+
+[dependencies]
+udev = { git = "https://github.com/devcexx/udev-rs" }
+lalrpop-util = "0.19"
+regex = "1"
+derive-new = "0.5"

@@ -1,0 +1,69 @@
+use super::ast;
+use std::iter::FromIterator;
+use lalrpop_util::ParseError;
+
+grammar;
+
+pub Program: ast::Program = {
+    <stmts:Rule*> => ast::Program::new(Vec::from_iter(stmts.into_iter()))
+}	
+
+pub Rule: ast::Rule = {
+    "DEFINE" <RuleDefine> ";" => ast::Rule::Define(<>),
+    "WHEN" <RuleWhen> "END" => ast::Rule::When(<>)
+}
+
+pub RuleDefine: ast::RuleDefine = {
+    "DEVICE" <Ident> "UDEV" "TAG" <LitStr> "DRIVER" <LitStr> => ast::RuleDefine::Device(ast::RuleDefineDevice::new(<>)),
+    "SENSOR" <Ident> "DEVICE" <Ident> "TYPE" <SensorType> "INDEX" <Integer> => ast::RuleDefine::Sensor(ast::RuleDefineSensor::new(<>)),
+    "OUTPUT" <Ident> "DEVICE" <Ident> "TYPE" <OutputType> "INDEX" <Integer> => ast::RuleDefine::Output(ast::RuleDefineOutput::new(<>))
+}
+
+pub RuleWhen: ast::RuleWhen = {
+    <ident:Ident> <cond:WhenCondition> "DO" <actions:WhenActionStmt*> => ast::RuleWhen::new(ident, cond, Vec::from_iter(actions.into_iter()))
+}
+
+pub WhenCondition: ast::WhenCondition = {
+    "BETWEEN" <Integer> "AND" <Integer> => ast::WhenCondition::Between(<>),
+    ">" <Integer> => ast::WhenCondition::GreaterThan(<>),
+    "<" <Integer> => ast::WhenCondition::LessThan(<>)
+}
+
+pub WhenActionStmt: ast::WhenAction = {
+    <WhenAction> ";"
+}
+
+pub WhenAction: ast::WhenAction = {
+    "SET" <Ident> <WhenOutputValue> => ast::WhenAction::OutputSet(ast::WhenActionOutputSet::new(<>))
+}
+
+pub WhenOutputValue: ast::OutputValue = {
+    "BETWEEN" <Percentage> "AND" <Percentage> => ast::OutputValue::Between(<>),
+    "TO" <Percentage> => ast::OutputValue::Fixed(<>)
+}
+
+pub SensorType: ast::SensorType = {
+    "TERMISTOR" => ast::SensorType::Termistor,
+    "FAN" => ast::SensorType::Fan
+}
+
+pub OutputType: ast::OutputType = {
+    "PWM" => ast::OutputType::Pwm
+}
+
+pub LitStr: String = <s:r#""([^"]*)""#> => {
+  let s2 = &s[1..s.len() - 1];
+  s2.into()
+};
+
+pub Ident: String = "`" <s:r"[a-zA-Z$_][a-zA-Z0-9$_]*"> "`" => s.into();
+pub Integer: i32 = <s:r"(\\+|-)?[0-9]+"> => s.parse().expect(&format!("Invalid number: {}", s));
+pub Percentage: i32 = <s:r"[0-9]+%"> =>? (&s[0..s.len()-1]).parse()
+    .map_err(|_| ParseError::User { error: "Invalid number" })
+    .and_then(|value| {
+        if value > 100 {
+            Err(ParseError::User { error: "Percentage too high" })
+        } else {
+            Ok(value)
+        }
+});
