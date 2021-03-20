@@ -1,12 +1,13 @@
 #[macro_use]
 extern crate derive_new;
 
+use clap::{App, Arg};
 use log::{info, warn};
 
 mod config;
 mod device;
 
-use std::cell::RefCell;
+use std::{cell::RefCell, error::Error};
 
 use config::{ast, checker::model as cmodel, SymbolDevice, SymbolOutput, SymbolSensor};
 use device::{udev_find_with_tags, Device, HwmonGenericDevice, Nct6775Device, PwmMode};
@@ -182,35 +183,31 @@ impl RunContext {
     }
 }
 
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     info!("Initializing fan control...");
 
-    let input = r#"
-DEFINE DEVICE `aio` UDEV TAG "fancontrol_aio" DRIVER "nct6775";
+    let matches = App::new("Fancontrol")
+        .version("1.0")
+        .author("devcexx")
+        .about("System monitor & fan control")
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("Specifies the path of the configuration file")
+                .takes_value(true)
+                .required(true),
+        )
+        .get_matches();
 
-DEFINE SENSOR `aio_liquid_temp`
-        DEVICE `aio`
-        TYPE TERMISTOR
-        INDEX 1;
+    let config_path = matches.value_of("config").unwrap();
+    let conf_program = config::conffile::ProgramParser::new()
+        .parse(&std::fs::read_to_string(config_path)?)
+        .map_err::<Box<dyn Error>, _>(|err| err.to_string().into())?;
 
-DEFINE OUTPUT `aio_pump`
-        DEVICE `aio`
-        TYPE PWM
-        INDEX 1;
-
-WHEN `aio_liquid_temp` BETWEEN 10 AND 50 DO
-   LOG;
-   SET `aio_pump` BETWEEN 0% AND 50%;
-END
-
-WHEN `aio_liquid_temp` > 50 DO
-   SET `aio_pump` TO 50%;
-END
-"#;
-    let def_file = config::conffile::ProgramParser::new().parse(input).unwrap();
-
-    let program = match config::check_program(def_file) {
+    let program = match config::check_program(conf_program) {
         Ok(p) => p,
         Err(e) => panic!("Semantic error: {}", e),
     };
