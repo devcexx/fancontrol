@@ -1,4 +1,5 @@
 #![feature(associated_type_bounds)]
+#![feature(concat_idents)]
 
 #[macro_use]
 extern crate derive_new;
@@ -21,10 +22,10 @@ use udev::Device as UdevDevice;
 #[macro_use]
 extern crate lalrpop_util;
 
-fn create_device(driver: &str, name: String, device: UdevDevice) -> Box<dyn Device> {
+fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
     let builder = driver_registry_find(driver).unwrap();
-    builder.from_udev(name, device)
+    builder.from_udev(name, device, dryrun)
 }
 
 #[derive(new, Debug)]
@@ -138,7 +139,7 @@ impl RunContext {
                 device
                     .write_pwm(
                         target.index as u8,
-                        PwmMode::ManualPercent(Percent::from(value)),
+                        PwmMode::ManualPercent(Percent::from(value as u32)), // FIXME Check for positive values on config semantic check.
                     )
                     .unwrap(); // FIXME Return a result
             } else {
@@ -195,7 +196,6 @@ impl RunContext {
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    info!("Initializing fan control...");
 
     let matches = App::new("Fancontrol")
         .version("1.0")
@@ -210,9 +210,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .takes_value(true)
                 .required(true),
         )
+        .arg(
+	    Arg::with_name("dry-run")
+		.short("n")
+		.long("dry-run")
+		.help("Instructs the device drivers to run on dry-mode, without actually performing any changes on the underlying devices. This, combined with setting the environment variable \"RUST_LOG\" to \"debug\" is useful for debugging the program or configuration rules.")
+	)
         .get_matches();
 
     let config_path = matches.value_of("config").unwrap();
+    let dryrun = matches.is_present("dry-run");
+
+    info!("Initializing fan control...");
     let conf_program = config::conffile::ProgramParser::new()
         .parse(&std::fs::read_to_string(config_path)?)
         .map_err::<Box<dyn Error>, _>(|err| err.to_string().into())?;
@@ -233,7 +242,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     device.name,
                     &udev_dev.devpath()
                 );
-                let device = create_device(&device.driver, device.name.clone(), udev_dev);
+                let device = create_device(&device.driver, device.name.clone(), udev_dev, dryrun);
                 Some(device)
             }
 

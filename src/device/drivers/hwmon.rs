@@ -1,6 +1,7 @@
 use log::debug;
 use udev::Device as UdevDevice;
 
+use crate::dev_debug;
 use crate::{
     device::{Device, DeviceBuilder, PwmMode},
     types::TempCelsius,
@@ -9,8 +10,8 @@ use std::io::{Error, Result};
 pub struct Builder;
 
 impl DeviceBuilder for Builder {
-    fn from_udev(&self, name: String, device: UdevDevice) -> Box<dyn Device> {
-        Box::new(HwmonDevice::from_udev(name, device))
+    fn from_udev(&self, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
+        Box::new(HwmonDevice::from_udev(name, device, dryrun))
     }
 }
 
@@ -18,6 +19,7 @@ impl DeviceBuilder for Builder {
 pub struct HwmonDevice {
     name: String,
     device: UdevDevice,
+    dryrun: bool,
 }
 
 impl std::fmt::Debug for HwmonDevice {
@@ -28,9 +30,23 @@ impl std::fmt::Debug for HwmonDevice {
     }
 }
 
+macro_rules! run_action {
+    ($self:ident, $block:block) => {
+        if !$self.dryrun {
+            $block
+        }
+    };
+}
+
+macro_rules! log_write {
+    ($self:ident, $value:expr, $attr:expr) => {
+        dev_debug!($self, "write '{}' to attr `{}`.", $value, $attr);
+    };
+}
+
 impl HwmonDevice {
-    pub fn from_udev(name: String, device: UdevDevice) -> HwmonDevice {
-        HwmonDevice::new(name, device)
+    pub fn from_udev(name: String, device: UdevDevice, dryrun: bool) -> HwmonDevice {
+        HwmonDevice::new(name, device, dryrun)
     }
 
     fn pwm_enable_attr(num: u8) -> String {
@@ -47,25 +63,29 @@ impl HwmonDevice {
 
     pub fn write_raw_pwm(&self, num: u8, value: u8) -> Result<()> {
         let attr_value = Self::pwm_attr(num);
-        let path = self.device.syspath().join(attr_value);
-        debug!("Writing '{}' into '{:?}'", value, path);
-        //	std::fs::write(&path, format!("{}\n", value)).unwrap();
+        let path = self.device.syspath().join(&attr_value);
+        log_write!(self, value, attr_value);
+        run_action!(self, {
+            std::fs::write(&path, format!("{}\n", value))?;
+        });
+
         Ok(())
     }
 
     pub fn write_pwm_enable(&self, num: u8, enable: &str) -> Result<()> {
         let attr_enable = Self::pwm_enable_attr(num);
-        let path = self.device.syspath().join(attr_enable);
-        debug!("Writing '{}' into '{:?}'", enable, path);
-        //	std::fs::write(&path, format!("{}\n", enable)).unwrap();
+        let path = self.device.syspath().join(&attr_enable);
+        log_write!(self, enable, attr_enable);
+        run_action!(self, {
+            std::fs::write(&path, format!("{}\n", enable))?;
+        });
+
         Ok(())
     }
 
     pub fn write_pwm_enable_and_value(&self, num: u8, enable: &str, value: u8) -> Result<()> {
         self.write_pwm_enable(num, enable)?;
-        self.write_raw_pwm(num, value)?;
-
-        Ok(())
+        self.write_raw_pwm(num, value)
     }
 
     pub fn read_attr(&self, name: &str) -> Result<String> {
@@ -87,7 +107,14 @@ impl Device for HwmonDevice {
             }
             PwmMode::ManualAbs(value) => self.write_raw_pwm(index, value),
             PwmMode::ManualPercent(value) => {
-                self.write_raw_pwm(index, value.map_to_range(0u8, 255u8))
+                dev_debug!(
+                    self,
+                    "Request set pwm {} of {} to {}.",
+                    index,
+                    &self.name,
+                    value
+                );
+                self.write_raw_pwm(index, value.point_at_range(0u8, 255u8))
             }
         }
     }

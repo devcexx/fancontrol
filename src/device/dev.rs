@@ -13,7 +13,7 @@ pub enum PwmMode {
 }
 
 pub trait DeviceBuilder {
-    fn from_udev(&self, name: String, device: UdevDevice) -> Box<dyn Device>;
+    fn from_udev(&self, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device>;
 }
 
 pub trait Device: Debug {
