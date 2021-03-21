@@ -257,6 +257,7 @@ dependencies = [
  "env_logger",
  "lalrpop",
  "lalrpop-util",
+ "lazy_static",
  "log",
  "regex",
  "udev",

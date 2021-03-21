@@ -1,25 +1,30 @@
+#![feature(associated_type_bounds)]
+
 #[macro_use]
 extern crate derive_new;
 
 use clap::{App, Arg};
 use log::{info, warn};
+use types::{Percent, TempCelsius};
 
 mod config;
 mod device;
+mod types;
+mod util;
 
 use std::{cell::RefCell, error::Error};
 
 use config::{ast, checker::model as cmodel, SymbolDevice, SymbolOutput, SymbolSensor};
-use device::{udev_find_with_tags, Device, HwmonGenericDevice, Nct6775Device, PwmMode};
+use device::{driver_registry_find, udev_find_with_tags, Device, PwmMode};
+use udev::Device as UdevDevice;
 
 #[macro_use]
 extern crate lalrpop_util;
 
-fn create_device(driver: &str, name: String, device: HwmonGenericDevice) -> Box<dyn Device> {
-    match driver {
-        "nct6775" => Box::new(Nct6775Device::new(name, device)),
-        _ => panic!("Unknown driver {}", driver),
-    }
+fn create_device(driver: &str, name: String, device: UdevDevice) -> Box<dyn Device> {
+    // FIXME Unwrap
+    let builder = driver_registry_find(driver).unwrap();
+    builder.from_udev(name, device)
 }
 
 #[derive(new, Debug)]
@@ -33,11 +38,14 @@ impl<'prog> OnlineThermalRule<'prog> {
         let sensor_value = self.sensor.read_cached();
         match self.rule {
             cmodel::When::Unbounded(rule) => match rule.condition {
-                cmodel::WhenUnboundedCond::Greater(lo) => sensor_value > lo,
-                cmodel::WhenUnboundedCond::Less(hi) => sensor_value < hi,
+                cmodel::WhenUnboundedCond::Greater(lo) => {
+                    sensor_value > TempCelsius::from_celsius(lo)
+                }
+                cmodel::WhenUnboundedCond::Less(hi) => sensor_value < TempCelsius::from_celsius(hi),
             },
             cmodel::When::Bounded(rule) => {
-                sensor_value >= rule.min_value && sensor_value <= rule.max_value
+                sensor_value >= TempCelsius::from_celsius(rule.min_value)
+                    && sensor_value <= TempCelsius::from_celsius(rule.max_value)
             }
         }
     }
@@ -47,7 +55,7 @@ impl<'prog> OnlineThermalRule<'prog> {
 struct OnlineSensor<'prog> {
     device: &'prog Box<dyn Device>,
     symbol: &'prog SymbolSensor,
-    _cached_value: RefCell<Option<i32>>,
+    _cached_value: RefCell<Option<TempCelsius>>,
 }
 
 impl<'prog> OnlineSensor<'prog> {
@@ -59,11 +67,11 @@ impl<'prog> OnlineSensor<'prog> {
         }
     }
 
-    fn read(&'prog self) -> i32 {
-        self.device.temp_read(self.symbol.index as u8).unwrap()
+    fn read(&'prog self) -> TempCelsius {
+        self.device.read_temp(self.symbol.index as u8).unwrap()
     }
 
-    fn read_cached(&'prog self) -> i32 {
+    fn read_cached(&'prog self) -> TempCelsius {
         // TODO fix this shit.
         if let Some(&value) = self._cached_value.borrow().as_ref() {
             return value;
@@ -127,10 +135,12 @@ impl RunContext {
             value: i32,
         ) {
             if let Some(device) = context.find_device(&target.device.name) {
-                device.pwm_set(
-                    target.index as u8,
-                    PwmMode::Manual(((value as f64) * 255.0 / 100.0) as u8),
-                )
+                device
+                    .write_pwm(
+                        target.index as u8,
+                        PwmMode::ManualPercent(Percent::from(value)),
+                    )
+                    .unwrap(); // FIXME Return a result
             } else {
                 warn!(
                     "Couldn't completely apply rule: Cannot find device `{}`",
@@ -164,7 +174,7 @@ impl RunContext {
                         cmodel::Action::Log => print_log(&rule.sensor),
                         cmodel::Action::OutputSet(action) => match action.value {
                             ast::OutputValue::Between(lo, hi) => {
-                                let sensor_value = rule.sensor.read_cached() as f64;
+                                let sensor_value = rule.sensor.read_cached().celsius() as f64;
                                 let maxval = when.max_value as f64;
                                 let minval = when.min_value as f64;
                                 let progress = (sensor_value - minval) / (maxval - minval);
@@ -223,8 +233,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     device.name,
                     &udev_dev.devpath()
                 );
-                let hwmon_dev = HwmonGenericDevice::from_udev(udev_dev);
-                let device = create_device(&device.driver, device.name.clone(), hwmon_dev);
+                let device = create_device(&device.driver, device.name.clone(), udev_dev);
                 Some(device)
             }
 

@@ -2,12 +2,11 @@ use std::ffi::OsStr;
 use udev::Device as UdevDevice;
 
 mod dev;
-mod hwmon;
-mod nct6775;
+pub mod drivers;
+mod registry;
 
 pub use dev::*;
-pub use hwmon::*;
-pub use nct6775::*;
+pub use registry::driver_registry_find;
 
 pub fn udev_find_with_tags<T: AsRef<OsStr>>(tags: Vec<T>) -> Option<UdevDevice> {
     let mut enumerator = udev::Enumerator::new().unwrap();
