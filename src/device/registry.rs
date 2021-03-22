@@ -18,7 +18,8 @@ macro_rules! driver_registry {
 }
 
 driver_registry! {
-    ("nct6775" . drivers::nct6775::Builder {})
+    ("nct6775" . drivers::nct6775::Builder {}),
+    ("hwmon" . drivers::hwmon::Builder {})
 }
 
 pub fn driver_registry_find(name: &str) -> Option<&Box<dyn DeviceBuilder + Sync>> {
