@@ -50,6 +50,8 @@ pub enum WhenUnboundedCond {
 
 #[derive(Debug, new)]
 pub struct WhenUnbounded {
+    pub rule_index: u32,
+    pub tag: Option<String>,
     pub sensor: Rc<SymbolSensor>,
     pub condition: WhenUnboundedCond,
     pub actions: Vec<Action<OutputSetFixed>>,
@@ -57,6 +59,8 @@ pub struct WhenUnbounded {
 
 #[derive(Debug, new)]
 pub struct WhenBounded {
+    pub rule_index: u32,
+    pub tag: Option<String>,
     pub sensor: Rc<SymbolSensor>,
     pub min_value: i32,
     pub max_value: i32,

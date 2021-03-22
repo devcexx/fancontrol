@@ -81,6 +81,7 @@ pub enum WhenCondition {
 
 #[derive(new, Debug, Clone)]
 pub struct RuleWhen {
+    pub tag: Option<String>,
     pub sensor: String,
     pub condition: WhenCondition,
     pub actions: Vec<WhenAction>,

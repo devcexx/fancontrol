@@ -50,6 +50,7 @@ fn process_define_rule(
 
 fn process_when_rule(
     sym_table: &mut SymbolTable,
+    rule_index: u32,
     rule: ast::RuleWhen,
 ) -> ProgramCheckResult<model::When> {
     fn into_fixed_actions(
@@ -94,15 +95,24 @@ fn process_when_rule(
     }
 
     Ok(match rule.condition {
-        ast::WhenCondition::Between(low, high) => {
-            model::When::Bounded(model::WhenBounded::new(sensor.clone(), low, high, actions))
-        }
+        ast::WhenCondition::Between(low, high) => model::When::Bounded(model::WhenBounded::new(
+	    rule_index,
+            rule.tag,
+            sensor.clone(),
+            low,
+            high,
+            actions,
+        )),
         ast::WhenCondition::GreaterThan(low) => model::When::Unbounded(model::WhenUnbounded::new(
+	    rule_index,
+            rule.tag,
             sensor.clone(),
             model::WhenUnboundedCond::Greater(low),
             into_fixed_actions(actions)?,
         )),
         ast::WhenCondition::LessThan(high) => model::When::Unbounded(model::WhenUnbounded::new(
+	    rule_index,
+            rule.tag,
             sensor.clone(),
             model::WhenUnboundedCond::Less(high),
             into_fixed_actions(actions)?,
@@ -121,7 +131,11 @@ pub fn check_program(program: ast::Program) -> ProgramCheckResult<model::Thermal
             }
 
             ast::Rule::When(when) => {
-                when_rules.push(process_when_rule(&mut symbol_table, when)?);
+                when_rules.push(process_when_rule(
+                    &mut symbol_table,
+                    when_rules.len() as u32,
+                    when,
+                )?);
             }
         }
     }
