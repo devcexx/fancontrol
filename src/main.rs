@@ -5,6 +5,7 @@
 extern crate derive_new;
 
 use clap::{App, Arg};
+use env_logger::fmt::Color;
 use log::{info, warn};
 use types::{Percent, TempCelsius};
 
@@ -13,7 +14,7 @@ mod device;
 mod types;
 mod util;
 
-use std::{cell::RefCell, error::Error};
+use std::{cell::RefCell, error::Error, io::Write};
 
 use config::{
     ast, checker::model as cmodel, model::When, SymbolDevice, SymbolOutput, SymbolSensor,
@@ -188,7 +189,28 @@ impl RunContext {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{}{} {:<5} {}{} {}",
+                buf.style()
+                    .set_color(Color::Black)
+                    .set_intense(true)
+                    .clone()
+                    .value("["),
+                buf.timestamp_seconds(),
+                buf.default_styled_level(record.level()),
+                record.target(),
+                buf.style()
+                    .set_color(Color::Black)
+                    .set_intense(true)
+                    .clone()
+                    .value("]"),
+                record.args()
+            )
+        })
+        .init();
 
     let matches = App::new("Fancontrol")
         .version("1.0")
