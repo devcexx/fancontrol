@@ -1,7 +1,7 @@
 use crate::config::SymbolSensor;
 use crate::config::SymbolTable;
 use crate::{ast, config::SymbolOutput};
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
 #[derive(new, Debug)]
 pub struct ThermalProgram {
@@ -61,6 +61,14 @@ impl When {
         match &self.behavior {
             WhenBehavior::Bounded(bounded) => WhenRuleIter::from_bounded(bounded),
             WhenBehavior::Unbounded(unbounded) => WhenRuleIter::from_unbouded(unbounded),
+        }
+    }
+
+    pub fn rule_name<'a>(&'a self) -> Cow<'a, str> {
+        if let Some(tag) = &self.tag {
+            Cow::Borrowed(tag)
+        } else {
+            Cow::Owned(format!("#{}", self.rule_index + 1))
         }
     }
 }

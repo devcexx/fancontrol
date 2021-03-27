@@ -15,7 +15,9 @@ mod util;
 
 use std::{cell::RefCell, error::Error};
 
-use config::{ast, checker::model as cmodel, SymbolDevice, SymbolOutput, SymbolSensor};
+use config::{
+    ast, checker::model as cmodel, model::When, SymbolDevice, SymbolOutput, SymbolSensor,
+};
 use device::{driver_registry_find, udev_find_with_tags, Device, PwmMode};
 use udev::Device as UdevDevice;
 
@@ -150,9 +152,10 @@ impl RunContext {
             }
         }
 
-        fn print_log(sensor: &OnlineSensor) {
+        fn print_log(rule: &When, sensor: &OnlineSensor) {
             info!(
-                "Value of {} is currently: {}",
+                "[Rule '{}'] Value of {} is currently: {}",
+                rule.rule_name(),
                 &sensor.symbol.name,
                 sensor.read_cached()
             );
@@ -161,7 +164,7 @@ impl RunContext {
         let when = online_rule.rule;
         for action in when.iter_actions() {
             match action {
-                cmodel::AnyAction::Log => print_log(&online_rule.sensor),
+                cmodel::AnyAction::Log => print_log(when, &online_rule.sensor),
                 cmodel::AnyAction::BoundedOutputSet {
                     behavior,
                     target,
