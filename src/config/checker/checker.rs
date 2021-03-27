@@ -94,30 +94,26 @@ fn process_when_rule(
         }
     }
 
-    Ok(match rule.condition {
-        ast::WhenCondition::Between(low, high) => model::When::Bounded(model::WhenBounded::new(
-	    rule_index,
-            rule.tag,
-            sensor.clone(),
-            low,
-            high,
-            actions,
-        )),
-        ast::WhenCondition::GreaterThan(low) => model::When::Unbounded(model::WhenUnbounded::new(
-	    rule_index,
-            rule.tag,
-            sensor.clone(),
-            model::WhenUnboundedCond::Greater(low),
-            into_fixed_actions(actions)?,
-        )),
-        ast::WhenCondition::LessThan(high) => model::When::Unbounded(model::WhenUnbounded::new(
-	    rule_index,
-            rule.tag,
-            sensor.clone(),
-            model::WhenUnboundedCond::Less(high),
-            into_fixed_actions(actions)?,
-        )),
-    })
+    let behavior = match rule.condition {
+        ast::WhenCondition::Between(low, high) => {
+            model::WhenBehavior::Bounded(model::WhenBoundedBehavior::new(low, high, actions))
+        }
+        ast::WhenCondition::GreaterThan(low) => {
+            model::WhenBehavior::Unbounded(model::WhenUnboundedBehavior::new(
+                model::WhenUnboundedCond::Greater(low),
+                into_fixed_actions(actions)?,
+            ))
+        }
+        ast::WhenCondition::LessThan(high) => {
+            model::WhenBehavior::Unbounded(model::WhenUnboundedBehavior::new(
+                model::WhenUnboundedCond::Less(high),
+                into_fixed_actions(actions)?,
+            ))
+        }
+    };
+
+    let rule = model::When::new(rule_index, rule.tag, sensor.clone(), behavior);
+    Ok(rule)
 }
 
 pub fn check_program(program: ast::Program) -> ProgramCheckResult<model::ThermalProgram> {

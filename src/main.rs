@@ -37,16 +37,16 @@ struct OnlineThermalRule<'prog> {
 impl<'prog> OnlineThermalRule<'prog> {
     pub fn is_triggered(&self) -> bool {
         let sensor_value = self.sensor.read_cached();
-        match self.rule {
-            cmodel::When::Unbounded(rule) => match rule.condition {
+        match &self.rule.behavior {
+            cmodel::WhenBehavior::Unbounded(rule) => match rule.condition {
                 cmodel::WhenUnboundedCond::Greater(lo) => {
                     sensor_value > TempCelsius::from_celsius(lo)
                 }
                 cmodel::WhenUnboundedCond::Less(hi) => sensor_value < TempCelsius::from_celsius(hi),
             },
-            cmodel::When::Bounded(rule) => {
-                sensor_value >= TempCelsius::from_celsius(rule.min_value)
-                    && sensor_value <= TempCelsius::from_celsius(rule.max_value)
+            cmodel::WhenBehavior::Bounded(rule) => {
+                sensor_value >= TempCelsius::from_celsius(rule.cond_min_value)
+                    && sensor_value <= TempCelsius::from_celsius(rule.cond_max_value)
             }
         }
     }
@@ -110,9 +110,9 @@ impl RunContext {
         self.thermal_program
             .rules
             .iter()
-            .filter_map(|rule| match self.find_device(&rule.sensor().device.name) {
+            .filter_map(|rule| match self.find_device(&rule.sensor.device.name) {
                 Some(device) => Some(OnlineThermalRule::new(
-                    OnlineSensor::new(device, &rule.sensor()),
+                    OnlineSensor::new(device, &rule.sensor),
                     rule,
                 )),
                 None => None,
@@ -128,7 +128,7 @@ impl RunContext {
         }
     }
 
-    pub fn apply_rule(&self, rule: &OnlineThermalRule) {
+    pub fn apply_rule(&self, online_rule: &OnlineThermalRule) {
         fn apply(
             context: &RunContext,
             rule: &OnlineThermalRule,
@@ -158,36 +158,26 @@ impl RunContext {
             );
         }
 
-        match rule.rule {
-            cmodel::When::Unbounded(when) => {
-                for action in &when.actions {
-                    match action {
-                        cmodel::Action::Log => print_log(&rule.sensor),
-                        cmodel::Action::OutputSet(action) => {
-                            apply(self, rule, &action.target, action.value)
-                        }
-                    }
-                }
-            }
-            cmodel::When::Bounded(when) => {
-                for action in &when.actions {
-                    match action {
-                        cmodel::Action::Log => print_log(&rule.sensor),
-                        cmodel::Action::OutputSet(action) => match action.value {
-                            ast::OutputValue::Between(lo, hi) => {
-                                let sensor_value = rule.sensor.read_cached().celsius() as f64;
-                                let maxval = when.max_value as f64;
-                                let minval = when.min_value as f64;
-                                let progress = (sensor_value - minval) / (maxval - minval);
+        let when = online_rule.rule;
+        for action in when.iter_actions() {
+            match action {
+                cmodel::AnyAction::Log => print_log(&online_rule.sensor),
+                cmodel::AnyAction::BoundedOutputSet {
+                    behavior,
+                    target,
+                    min,
+                    max,
+                } => {
+                    let sensor_value = online_rule.sensor.read_cached().celsius() as f64;
+                    let maxval = behavior.cond_max_value as f64;
+                    let minval = behavior.cond_min_value as f64;
+                    let progress = (sensor_value - minval) / (maxval - minval);
 
-                                let output_per = lo + (progress * (hi as f64 - lo as f64)) as i32;
-                                apply(self, rule, &action.target, output_per);
-                            }
-                            ast::OutputValue::Fixed(value) => {
-                                apply(self, rule, &action.target, value)
-                            }
-                        },
-                    }
+                    let output_per = min + (progress * (max as f64 - min as f64)) as i32;
+                    apply(self, online_rule, &target, output_per);
+                }
+                cmodel::AnyAction::FixedOutputSet { target, value } => {
+                    apply(self, online_rule, &target, value)
                 }
             }
         }
