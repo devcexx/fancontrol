@@ -30,7 +30,7 @@ use udev::Device as UdevDevice;
 #[macro_use]
 extern crate lalrpop_util;
 
-targeted_log!("fancontrol::rule {}", rule_);
+targeted_log!("config::rule {}", rule_);
 
 fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
