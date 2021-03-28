@@ -7,7 +7,10 @@ extern crate derive_new;
 use clap::{App, Arg};
 use env_logger::fmt::Color;
 use log::{info, warn};
-use std::hash::Hash;
+use std::{
+    hash::Hash,
+    time::{Duration, Instant, SystemTime},
+};
 use targeted_log::targeted_log;
 use types::{Percent, TempCelsius};
 
@@ -339,10 +342,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 		.long("dry-run")
 		.help("Instructs the device drivers to run on dry-mode, without actually performing any changes on the underlying devices. This, combined with setting the environment variable \"RUST_LOG\" to \"debug\" is useful for debugging the program or configuration rules.")
 	)
+        .arg(
+	    Arg::with_name("interval")
+		.short("t")
+		.long("interval")
+		.help("Defines the interval between each time the sensors and the rule are evaluated, in milliseconds.")
+		.default_value("1000")
+	)
         .get_matches();
 
     let config_path = matches.value_of("config").unwrap();
     let dryrun = matches.is_present("dry-run");
+    let interval = Duration::from_millis(clap::value_t_or_exit!(matches.value_of("interval"), u64));
 
     info!("Initializing fan control...");
     let conf_program = config::conffile::ProgramParser::new()
@@ -381,6 +392,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let context: RunContext = RunContext::new(program, devices);
     loop {
+        let start_time = Instant::now();
+
         let online_rules: Vec<OnlineThermalRule> = context.get_online_rules();
         let applying_rules: Vec<ComputedRule> = online_rules
             .iter()
@@ -453,6 +466,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        std::thread::sleep_ms(1000);
+        std::thread::sleep((interval - start_time.elapsed()).max(Duration::default()));
     }
 }
