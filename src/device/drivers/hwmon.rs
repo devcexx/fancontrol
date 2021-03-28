@@ -1,7 +1,5 @@
-use log::debug;
 use udev::Device as UdevDevice;
 
-use crate::dev_debug;
 use crate::{
     device::{Device, DeviceBuilder, PwmMode},
     types::TempCelsius,
@@ -14,6 +12,8 @@ impl DeviceBuilder for Builder {
         Box::new(HwmonDevice::from_udev(name, device, dryrun))
     }
 }
+
+crate::driver_log_define!("hwmon", hwmon_);
 
 #[derive(new)]
 pub struct HwmonDevice {
@@ -40,7 +40,7 @@ macro_rules! run_action {
 
 macro_rules! log_write {
     ($self:ident, $value:expr, $attr:expr) => {
-        dev_debug!($self, "write '{}' to attr `{}`.", $value, $attr);
+	hwmon_debug!(@ $self.name; "write '{}' to attr `{}`.", $value, $attr);
     };
 }
 
@@ -107,8 +107,7 @@ impl Device for HwmonDevice {
             }
             PwmMode::ManualAbs(value) => self.write_raw_pwm(index, value),
             PwmMode::ManualPercent(value) => {
-                dev_debug!(
-                    self,
+                hwmon_debug!(@ self.name;
                     "Request set pwm {} of {} to {}.",
                     index,
                     &self.name,

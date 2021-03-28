@@ -260,6 +260,7 @@ dependencies = [
  "lazy_static",
  "log",
  "regex",
+ "targeted_log",
  "udev",
 ]
 
@@ -411,6 +412,12 @@ name = "opaque-debug"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2839e79665f131bdb5782e51f2c6c9599c133c6098982a54c794358bf432529c"
+
+[[package]]
+name = "paste"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
 
 [[package]]
 name = "petgraph"
@@ -580,6 +587,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
+]
+
+[[package]]
+name = "targeted_log"
+version = "0.1.0"
+source = "git+https://github.com/devcexx/targeted_log#065482126a81f248b724a9eafc801a0929a5c8f5"
+dependencies = [
+ "log",
+ "paste",
 ]
 
 [[package]]

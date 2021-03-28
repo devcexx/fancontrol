@@ -1,7 +1,6 @@
 use std::io::Result;
 
 use super::hwmon::HwmonDevice;
-use crate::dev_debug;
 use crate::{
     device::{Device, DeviceBuilder, PwmMode},
     types::TempCelsius,
@@ -19,6 +18,8 @@ impl DeviceBuilder for Builder {
         Box::new(Nct6775Device::from_udev(name, device, dryrun))
     }
 }
+
+crate::driver_log_define!("nct6775", nct6775_);
 
 #[derive(new, Debug)]
 pub struct Nct6775Device {
@@ -38,7 +39,7 @@ impl Device for Nct6775Device {
             PwmMode::Auto => self.device.write_pwm_enable(index, NCT6775_PWM_MODE_AUTO),
             PwmMode::Full => self.device.write_pwm_enable(index, NCT6775_PWM_MODE_FULL),
             PwmMode::ManualPercent(percent) => {
-                dev_debug!(self, "Request PWM {} set to {}.", index, percent);
+                nct6775_debug!(@ self.name; "Request PWM {} set to {}.", index, percent);
                 self.device.write_pwm_enable_and_value(
                     index,
                     NCT6775_PWM_MODE_MANUAL,
