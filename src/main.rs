@@ -6,8 +6,9 @@ extern crate derive_new;
 
 use clap::{App, Arg};
 use env_logger::fmt::Color;
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::hash::Hash;
+use targeted_log::targeted_log;
 use types::{Percent, TempCelsius};
 
 mod config;
@@ -25,6 +26,8 @@ use udev::Device as UdevDevice;
 
 #[macro_use]
 extern crate lalrpop_util;
+
+targeted_log!("fancontrol::rule {}", rule_);
 
 fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
@@ -231,10 +234,9 @@ impl RunContext {
 }
 
 fn print_log(rule: &When, sensor: &OnlineSensor) {
-    info!(
-        "[Rule '{}'] Value of {} is currently: {}",
-        rule.rule_name(),
-        &sensor.symbol.name,
+    rule_info!(@ rule.rule_name();
+        "Value of {} is {}.",
+        sensor.symbol.name,
         sensor.read_cached()
     );
 }
@@ -431,11 +433,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             let output = key.output;
 
             if let Some(device) = context.find_device(&output.device.name) {
-                debug!(
-                    "Setting output `{}` to {}% by rule '{}'",
+                rule_debug!(@ value.rule.when.rule_name();
+                    "Set `{}` to {}%.",
                     output.name,
-                    value.value,
-                    value.rule.when.rule_name()
+                    value.value
                 );
 
                 device
