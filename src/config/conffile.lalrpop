@@ -4,6 +4,12 @@ use lalrpop_util::ParseError;
 
 grammar;
 
+match {
+    r"\s*" => { },
+    r"#[^\n\r]*[\n\r]*" => { },
+    _
+}
+
 pub Program: ast::Program = {
     <stmts:Rule*> => ast::Program::new(Vec::from_iter(stmts.into_iter()))
 }	
