@@ -39,6 +39,7 @@ fn process_define_rule(
                     device.clone(),
                     output.output_type,
                     output.index as u32,
+                    output.priorization,
                 )
                 .into(),
             );

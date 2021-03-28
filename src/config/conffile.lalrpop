@@ -20,7 +20,18 @@ Tag: String = {
 RuleDefine: ast::RuleDefine = {
     "DEVICE" <Ident> "UDEV" "TAG" <LitStr> "DRIVER" <LitStr> => ast::RuleDefine::Device(ast::RuleDefineDevice::new(<>)),
     "SENSOR" <Ident> "DEVICE" <Ident> "TYPE" <SensorType> "INDEX" <Integer> => ast::RuleDefine::Sensor(ast::RuleDefineSensor::new(<>)),
-    "OUTPUT" <Ident> "DEVICE" <Ident> "TYPE" <OutputType> "INDEX" <Integer> => ast::RuleDefine::Output(ast::RuleDefineOutput::new(<>))
+    "OUTPUT" <name:Ident> "DEVICE" <dev:Ident> "TYPE" <t:OutputType> "INDEX" <index:Integer> <pri:OutputPriorization?> =>
+        ast::RuleDefine::Output(ast::RuleDefineOutput::new(name, dev, t, index, pri.unwrap_or(ast::OutputPriorization::Latest)))
+}
+
+OutputPriorization: ast::OutputPriorization = {
+    "PRIORITIZE" <OutputPriorizationType> => <>
+}
+
+OutputPriorizationType: ast::OutputPriorization = {
+    "MAX" => ast::OutputPriorization::Max,
+    "MIN" => ast::OutputPriorization::Min,
+    "LATEST" => ast::OutputPriorization::Latest
 }
 
 RuleWhen: ast::RuleWhen = {

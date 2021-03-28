@@ -26,6 +26,20 @@ pub struct RuleDefineOutput {
     pub device: String,
     pub output_type: OutputType,
     pub index: i32,
+    pub priorization: OutputPriorization,
+}
+
+#[derive(Debug, Clone)]
+pub enum OutputPriorization {
+    Latest,
+    Min,
+    Max,
+}
+
+impl Default for OutputPriorization {
+    fn default() -> Self {
+        Self::Latest
+    }
 }
 
 #[derive(Clone)]

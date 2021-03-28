@@ -81,6 +81,7 @@ pub struct SymbolOutput {
     pub device: Rc<SymbolDevice>,
     pub output_type: ast::OutputType,
     pub index: u32,
+    pub priorization: ast::OutputPriorization,
 }
 
 impl SymbolType for SymbolDevice {
