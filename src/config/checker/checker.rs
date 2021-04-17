@@ -40,9 +40,9 @@ fn process_define_rule(
         ast::RuleDefine::Output(output) => {
             let device = sym_table.require_type::<SymbolDevice>(&output.device)?;
 
-            let output_index: u32 = output.index.try_into().map_err(|_| {
+            let output_index: u8 = output.index.try_into().map_err(|_| {
                 ProgramCheckError::SemanticError(SemanticError::NumberOutOfBounds(
-                    NumBoundary::GreaterOrEqual(0),
+                    NumBoundary::BetweenBothExclusive(0, 255),
                     output.index,
                 ))
             })?;

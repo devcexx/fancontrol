@@ -80,7 +80,7 @@ pub struct SymbolOutput {
     pub name: String,
     pub device: Rc<SymbolDevice>,
     pub output_type: ast::OutputType,
-    pub index: u32,
+    pub index: u8,
     pub priorization: ast::OutputPriorization,
 }
 

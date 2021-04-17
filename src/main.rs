@@ -460,10 +460,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
 
                 device
-                    .write_pwm(
-                        output.index as u8,
-                        PwmMode::ManualPercent(value.value), // FIXME Check for positive values on config semantic check.
-                    )
+                    .write_pwm(output.index, PwmMode::ManualPercent(value.value))
                     .unwrap(); // FIXME Return a result
             } else {
                 warn!(
