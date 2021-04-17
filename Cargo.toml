@@ -10,7 +10,8 @@ edition = "2018"
 lalrpop = { version = "0.19", features = ["lexer"] }
 
 [dependencies]
-udev = { git = "https://github.com/devcexx/udev-rs" }
+# Versions < 0.6.1 may be broken. See https://github.com/Smithay/udev-rs/issues/25
+udev = "^0.6.1"
 targeted_log = { git = "https://github.com/devcexx/targeted_log" }
 bounded_nums = { git = "https://github.com/devcexx/bounded_nums", rev = "8ffde34f" }
 lalrpop-util = "0.19"
