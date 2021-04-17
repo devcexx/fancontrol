@@ -1,6 +1,5 @@
 use super::ast;
 use std::iter::FromIterator;
-use lalrpop_util::ParseError;
 
 grammar;
 
@@ -81,12 +80,4 @@ LitStr: String = <s:r#""([^"]*)""#> => {
 TagName: String = <s:r"[a-zA-Z$_][a-zA-Z0-9$_]*"> => s.into();
 Ident: String = <s:r"`[a-zA-Z$_][a-zA-Z0-9$_]*`"> => (&s[1..s.len()-1]).into();
 Integer: i32 = <s:r"(\\+|-)?[0-9]+"> => s.parse().expect(&format!("Invalid number: {}", s));
-Percentage: i32 = <s:r"[0-9]+%"> =>? (&s[0..s.len()-1]).parse()
-    .map_err(|_| ParseError::User { error: "Invalid number" })
-    .and_then(|value| {
-        if value > 100 {
-            Err(ParseError::User { error: "Percentage too high" })
-        } else {
-            Ok(value)
-        }
-});
+Percentage: i32 = <s:r"[0-9]+%"> => (&s[0..s.len()-1]).parse().unwrap();

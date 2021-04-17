@@ -1,17 +1,26 @@
 use crate::util::BiggerNum;
+use bounded_nums::{AsBoundedU8, BoundariesError, BoundedU8};
 use std::{
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     fmt::{Debug, Display},
     ops::{Add, Deref, Div, Mul, Sub},
 };
 
+type InnerPercent = BoundedU8<0, 100>;
+
 #[repr(transparent)]
-#[derive(PartialEq, PartialOrd, Eq, Ord)]
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
 pub struct Percent {
-    value: u8,
+    value: InnerPercent,
 }
 
 impl Percent {
+    pub fn from_bounded<N: AsBoundedU8<0, 100>>(value: N) -> Percent {
+        Percent {
+            value: value.as_bounded_u8(),
+        }
+    }
+
     pub fn from_value_in_range<N: BiggerNum>(start: N, stop: N, point: N) -> Percent
     where
         N::Next: Copy
@@ -40,8 +49,9 @@ impl Percent {
         let length: N::Next = stop - start;
         let percent: N::Next = (hundred * (point - start)) / length;
 
+        // Unwrapping this is safe as long as start <= point <= stop is true.
         Percent {
-            value: percent.try_into().unwrap(),
+            value: InnerPercent::from_u8(percent.try_into().unwrap()).unwrap(),
         }
     }
 
@@ -58,7 +68,7 @@ impl Percent {
     {
         // FIXME start < stop.
         // FIXME ^^^^^^^^^^^^ start < stop or start <= stop ?
-        let value = N::Next::from(self.value);
+        let value = N::Next::from(self.value.value());
         let hundred = N::Next::from(100u8);
         let stop = N::Next::from(stop);
         let start = N::Next::from(start);
@@ -70,7 +80,7 @@ impl Percent {
 }
 
 impl Deref for Percent {
-    type Target = u8;
+    type Target = InnerPercent;
 
     fn deref(&self) -> &Self::Target {
         &self.value
@@ -79,37 +89,40 @@ impl Deref for Percent {
 
 impl Display for Percent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}%", self.value)
+        write!(f, "{}%", self.value.value())
     }
 }
 
 impl Debug for Percent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}%", self.value)
+        Display::fmt(&self, f)
     }
 }
 
-macro_rules! from_impl {
+macro_rules! try_from_impl {
     ($($t:ty)*) => {
 	$(
-	    impl From<$t> for Percent {
+	    impl TryFrom<$t> for Percent {
+		type Error = BoundariesError;
 		#[allow(unused_comparisons)]
-		fn from(value: $t) -> Self {
-		    if value > 100 {
-			panic!("Value out of a percent value: {}", value);
-		    }
-
-		    Percent {
-			value: value as u8
-		    }
+		fn try_from(value: $t) -> Result<Self, Self::Error> {
+		    u8::try_from(value)
+			.map_err(|_| {
+			    if value < 0 {
+				BoundariesError::Underflow
+			    } else {
+				BoundariesError::Overflow
+			    }
+			})
+			.and_then(|value| BoundedU8::<0, 100>::from_u8(value))
+			.map(Percent::from_bounded)
 		}
 	    }
 	)*
     };
 }
 
-// Accept only unsigned values.
-from_impl!(u8 u16 u32 u64 u128);
+try_from_impl!(u8 u16 u32 u64 u128 i8 i16 i32 i64 i128);
 
 #[cfg(test)]
 mod tests {
@@ -118,15 +131,15 @@ mod tests {
     #[test]
     fn from_value_in_range_success_range_0_to_100() {
         assert_eq!(
-            Percent::from(0u8),
+            Percent::from_bounded(InnerPercent::from_const::<0>()),
             Percent::from_value_in_range(0i32, 100i32, 0i32)
         );
         assert_eq!(
-            Percent::from(100u8),
+            Percent::from_bounded(InnerPercent::from_const::<100>()),
             Percent::from_value_in_range(0i32, 100i32, 100i32)
         );
         assert_eq!(
-            Percent::from(50u8),
+            Percent::from_bounded(InnerPercent::from_const::<50>()),
             Percent::from_value_in_range(0i32, 100i32, 50i32)
         );
     }
@@ -134,36 +147,48 @@ mod tests {
     #[test]
     fn from_value_in_range_success_range_50_to_150() {
         assert_eq!(
-            Percent::from(0u8),
+            Percent::from_bounded(InnerPercent::from_const::<0>()),
             Percent::from_value_in_range(50i32, 150i32, 50i32)
         );
         assert_eq!(
-            Percent::from(100u8),
+            Percent::from_bounded(InnerPercent::from_const::<100>()),
             Percent::from_value_in_range(50i32, 150i32, 150i32)
         );
         assert_eq!(
-            Percent::from(50u8),
+            Percent::from_bounded(InnerPercent::from_const::<50>()),
             Percent::from_value_in_range(50i32, 150i32, 100i32)
         );
     }
 
     #[test]
     fn point_at_range_success_range_0_to_100() {
-        assert_eq!(0, Percent::from(0u8).point_at_range(0i32, 100i32));
-        assert_eq!(100, Percent::from(100u8).point_at_range(0i32, 100i32));
-        assert_eq!(50, Percent::from(50u8).point_at_range(0i32, 100i32));
+        assert_eq!(
+            0,
+            Percent::from_bounded(InnerPercent::from_const::<0>()).point_at_range(0i32, 100i32)
+        );
+        assert_eq!(
+            100,
+            Percent::from_bounded(InnerPercent::from_const::<100>()).point_at_range(0i32, 100i32)
+        );
+        assert_eq!(
+            50,
+            Percent::from_bounded(InnerPercent::from_const::<50>()).point_at_range(0i32, 100i32)
+        );
     }
 
     #[test]
     fn point_at_range_success_range_50_to_150() {
-        assert_eq!(50, Percent::from(0u8).point_at_range(50i32, 150i32));
-        assert_eq!(150, Percent::from(100u8).point_at_range(50i32, 150i32));
-        assert_eq!(100, Percent::from(50u8).point_at_range(50i32, 150i32));
-    }
-
-    #[test]
-    #[should_panic]
-    fn from_kaboom_value_greater_100() {
-        Percent::from(101u8);
+        assert_eq!(
+            50,
+            Percent::from_bounded(InnerPercent::from_const::<0>()).point_at_range(50i32, 150i32)
+        );
+        assert_eq!(
+            150,
+            Percent::from_bounded(InnerPercent::from_const::<100>()).point_at_range(50i32, 150i32)
+        );
+        assert_eq!(
+            100,
+            Percent::from_bounded(InnerPercent::from_const::<50>()).point_at_range(50i32, 150i32)
+        );
     }
 }

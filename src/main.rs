@@ -1,5 +1,6 @@
 #![feature(associated_type_bounds)]
 #![feature(concat_idents)]
+//#![feature(const_generics)]
 
 #[macro_use]
 extern crate derive_new;
@@ -8,8 +9,9 @@ use clap::{App, Arg};
 use env_logger::fmt::Color;
 use log::{info, warn};
 use std::{
+    convert::TryFrom,
     hash::Hash,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 use targeted_log::targeted_log;
 use types::{Percent, TempCelsius};
@@ -111,7 +113,7 @@ impl<'prog> Default for CombinedRule<'prog> {
 #[derive(new)]
 struct CombinedRuleOutputValue<'prog> {
     rule: &'prog OnlineThermalRule<'prog>,
-    value: i32,
+    value: Percent,
 }
 
 /// Result of taking a single rule and and computing its actions based
@@ -119,7 +121,7 @@ struct CombinedRuleOutputValue<'prog> {
 #[derive(Debug, new)]
 struct ComputedRule<'prog> {
     rule: &'prog OnlineThermalRule<'prog>,
-    output_values: HashMap<ComputedRuleOutputKey<'prog>, i32>,
+    output_values: HashMap<ComputedRuleOutputKey<'prog>, Percent>,
     should_log: bool,
 }
 
@@ -212,12 +214,17 @@ impl RunContext {
                     min,
                     max,
                 } => {
+                    // TODO Can this calculation be improved?
+                    let min = min.value() as f64;
+                    let max = max.value() as f64;
+
                     let sensor_value = online_rule.sensor.read_cached().celsius() as f64;
                     let maxval = behavior.cond_max_value as f64;
                     let minval = behavior.cond_min_value as f64;
                     let progress = (sensor_value - minval) / (maxval - minval);
 
-                    let output_per = min + (progress * (max as f64 - min as f64)) as i32;
+                    let output_per =
+                        Percent::try_from((min + (progress * (max - min))) as i32).unwrap();
 
                     // TODO Same key shouldn't exist already on the
                     // map. This must be checked on the semantic
@@ -362,7 +369,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let program = match config::check_program(conf_program) {
         Ok(p) => p,
-        Err(e) => panic!("Semantic error: {}", e),
+        Err(e) => panic!("Configuration error: {}", e),
     };
 
     let devices = program
@@ -455,7 +462,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 device
                     .write_pwm(
                         output.index as u8,
-                        PwmMode::ManualPercent(Percent::from(value.value as u32)), // FIXME Check for positive values on config semantic check.
+                        PwmMode::ManualPercent(value.value), // FIXME Check for positive values on config semantic check.
                     )
                     .unwrap(); // FIXME Return a result
             } else {

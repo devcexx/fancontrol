@@ -1,19 +1,25 @@
-use super::{model, ProgramCheckError, ProgramCheckResult, SemanticError};
-use crate::config::{
-    ast, Symbol, SymbolDevice, SymbolOutput, SymbolSensor, SymbolTable, SymbolTableResult,
-};
+use std::convert::TryInto;
+
+use model::OutputValue;
+
+use super::{model, NumBoundary, ProgramCheckError, ProgramCheckResult, SemanticError};
+use crate::config::{ast, Symbol, SymbolDevice, SymbolOutput, SymbolSensor, SymbolTable};
+use crate::types::Percent;
+use std::convert::TryFrom;
 
 fn process_define_rule(
     sym_table: &mut SymbolTable,
     rule: ast::RuleDefine,
-) -> SymbolTableResult<()> {
+) -> ProgramCheckResult<()> {
     (match rule {
-        ast::RuleDefine::Device(device) => sym_table.insert(
-            device.dev_name.clone(),
-            Symbol::Device(
-                SymbolDevice::new(device.dev_name, device.udev_tag, device.driver_name).into(),
-            ),
-        ),
+        ast::RuleDefine::Device(device) => sym_table
+            .insert(
+                device.dev_name.clone(),
+                Symbol::Device(
+                    SymbolDevice::new(device.dev_name, device.udev_tag, device.driver_name).into(),
+                ),
+            )
+            .map_err(|err| err.into()),
         ast::RuleDefine::Sensor(sensor) => {
             let device = sym_table.require_type::<SymbolDevice>(&sensor.device)?;
 
@@ -27,26 +33,41 @@ fn process_define_rule(
                 .into(),
             );
 
-            sym_table.insert(sensor.sensor_name, symbol)
+            sym_table
+                .insert(sensor.sensor_name, symbol)
+                .map_err(|err| err.into())
         }
         ast::RuleDefine::Output(output) => {
             let device = sym_table.require_type::<SymbolDevice>(&output.device)?;
 
-            // TODO Add index validation.
+            let output_index: u32 = output.index.try_into().map_err(|_| {
+                ProgramCheckError::SemanticError(SemanticError::NumberOutOfBounds(
+                    NumBoundary::GreaterOrEqual(0),
+                    output.index,
+                ))
+            })?;
+
             let symbol: Symbol = Symbol::Output(
                 SymbolOutput::new(
                     output.output_name.clone(),
                     device.clone(),
                     output.output_type,
-                    output.index as u32,
+                    output_index,
                     output.priorization,
                 )
                 .into(),
             );
-            sym_table.insert(output.output_name, symbol)
+            sym_table
+                .insert(output.output_name, symbol)
+                .map_err(|err| err.into())
         }
     })
     .map(|_| ())
+}
+
+fn cast_percent(value: i32) -> ProgramCheckResult<Percent> {
+    Percent::try_from(value)
+        .map_err(|err| ProgramCheckError::SemanticError(SemanticError::InvalidPercent(value)))
 }
 
 fn process_when_rule(
@@ -62,12 +83,12 @@ fn process_when_rule(
         for action in actions {
             match action {
                 model::Action::OutputSet(action) => match action.value {
-                    ast::OutputValue::Between(_, _) => {
+                    OutputValue::Between(_, _) => {
                         return Err(ProgramCheckError::SemanticError(
                             SemanticError::BetweenActionInUnboundedRule,
                         ))
                     }
-                    ast::OutputValue::Fixed(value) => result.push(model::Action::OutputSet(
+                    OutputValue::Fixed(value) => result.push(model::Action::OutputSet(
                         model::OutputSetFixed::new(action.target, value),
                     )),
                 },
@@ -87,9 +108,16 @@ fn process_when_rule(
             ast::WhenAction::Log => actions.push(model::Action::Log),
             ast::WhenAction::OutputSet(action) => {
                 let output = sym_table.require_type::<SymbolOutput>(&action.target_output)?;
+                let action_value = (match action.value {
+                    ast::OutputValue::Between(lo, hi) => ProgramCheckResult::Ok(
+                        OutputValue::Between(cast_percent(lo)?, cast_percent(hi)?),
+                    ),
+                    ast::OutputValue::Fixed(value) => Ok(OutputValue::Fixed(cast_percent(value)?)),
+                })?;
+
                 actions.push(model::Action::OutputSet(model::OutputSetGeneric::new(
                     output.clone(),
-                    action.value,
+                    action_value,
                 )))
             }
         }

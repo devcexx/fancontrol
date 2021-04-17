@@ -1,6 +1,6 @@
-use crate::config::SymbolSensor;
+use crate::config::SymbolOutput;
 use crate::config::SymbolTable;
-use crate::{ast, config::SymbolOutput};
+use crate::{config::SymbolSensor, types::Percent};
 use std::{borrow::Cow, rc::Rc};
 
 #[derive(new, Debug)]
@@ -9,16 +9,24 @@ pub struct ThermalProgram {
     pub rules: Vec<When>,
 }
 
+#[derive(Debug)]
+pub enum OutputValue {
+    Between(Percent, Percent),
+    Fixed(Percent),
+}
+
 #[derive(Debug, new)]
 pub struct OutputSetFixed {
     pub target: Rc<SymbolOutput>,
-    pub value: i32,
+
+    // TODO May accept other value types in the future (ej. absolute values), but let's keep it simple for now.
+    pub value: Percent,
 }
 
 #[derive(Debug, new)]
 pub struct OutputSetGeneric {
     pub target: Rc<SymbolOutput>,
-    pub value: ast::OutputValue,
+    pub value: OutputValue,
 }
 
 #[derive(Debug)]
@@ -33,12 +41,12 @@ pub enum AnyAction<'a> {
     BoundedOutputSet {
         behavior: &'a WhenBoundedBehavior,
         target: &'a Rc<SymbolOutput>,
-        min: i32,
-        max: i32,
+        min: Percent,
+        max: Percent,
     },
     FixedOutputSet {
         target: &'a Rc<SymbolOutput>,
-        value: i32,
+        value: Percent,
     },
 }
 
@@ -85,7 +93,7 @@ impl<'a> WhenRuleIter<'a> {
             Some(Action::Log) => Some(AnyAction::Log),
             Some(Action::OutputSet(OutputSetGeneric {
                 target,
-                value: ast::OutputValue::Between(min, max),
+                value: OutputValue::Between(min, max),
             })) => Some(AnyAction::BoundedOutputSet {
                 behavior: bounded,
                 target,
@@ -94,7 +102,7 @@ impl<'a> WhenRuleIter<'a> {
             }),
             Some(Action::OutputSet(OutputSetGeneric {
                 target,
-                value: ast::OutputValue::Fixed(value),
+                value: OutputValue::Fixed(value),
             })) => Some(AnyAction::FixedOutputSet {
                 target,
                 value: *value,

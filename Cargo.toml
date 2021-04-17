@@ -12,6 +12,7 @@ lalrpop = { version = "0.19", features = ["lexer"] }
 [dependencies]
 udev = { git = "https://github.com/devcexx/udev-rs" }
 targeted_log = { git = "https://github.com/devcexx/targeted_log" }
+bounded_nums = { git = "https://github.com/devcexx/bounded_nums", rev = "8ffde34f" }
 lalrpop-util = "0.19"
 regex = "1"
 derive-new = "0.5"
