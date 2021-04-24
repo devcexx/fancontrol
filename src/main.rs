@@ -454,7 +454,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             if let Some(device) = context.find_device(&output.device.name) {
                 rule_debug!(@ value.rule.when.rule_name();
-                    "Set `{}` to {}%.",
+                    "Set `{}` to {}.",
                     output.name,
                     value.value
                 );
