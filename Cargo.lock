@@ -266,9 +266,11 @@ dependencies = [
  "clap",
  "derive-new",
  "env_logger",
+ "guard",
  "lalrpop",
  "lalrpop-util",
  "lazy_static",
+ "libc",
  "log",
  "regex",
  "targeted_log",
@@ -300,6 +302,12 @@ dependencies = [
  "libc",
  "wasi",
 ]
+
+[[package]]
+name = "guard"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff893cc51ea04f8a3b73fbaf4376c06ebc5a0ccbe86d460896f805d9417c93ea"
 
 [[package]]
 name = "hashbrown"

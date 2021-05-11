@@ -1,13 +1,17 @@
 #![feature(associated_type_bounds)]
 #![feature(concat_idents)]
-//#![feature(const_generics)]
+#![feature(duration_zero)]
 
 #[macro_use]
 extern crate derive_new;
 
 use clap::{App, Arg};
 use env_logger::fmt::Color;
-use log::{info, warn};
+use guard::guard;
+use log::{error, info, warn};
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::rc::Rc;
 use std::{
     convert::TryFrom,
     hash::Hash,
@@ -15,10 +19,12 @@ use std::{
 };
 use targeted_log::targeted_log;
 use types::{Percent, TempCelsius};
+use udevpoll::{PollMode, UdevPoller};
 
 mod config;
 mod device;
 mod types;
+mod udevpoll;
 mod util;
 
 use std::{cell::RefCell, collections::HashMap, error::Error, io::Write};
@@ -26,18 +32,181 @@ use std::{cell::RefCell, collections::HashMap, error::Error, io::Write};
 use config::{
     ast, checker::model as cmodel, model::When, SymbolDevice, SymbolOutput, SymbolSensor,
 };
-use device::{driver_registry_find, udev_find_with_tags, Device, PwmMode};
-use udev::Device as UdevDevice;
+use device::{driver_registry_find, udev_extract_tags, udev_find_with_tags, Device, PwmMode};
+use udev::{Device as UdevDevice, Event, MonitorBuilder};
 
 #[macro_use]
 extern crate lalrpop_util;
 
 targeted_log!("config::rule {}", rule_);
+targeted_log!("udev_events", devev_);
 
 fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
     let builder = driver_registry_find(driver).unwrap();
     builder.from_udev(name, device, dryrun)
+}
+
+fn create_online_device_for_symbol<'prog>(
+    context: &RunContext<'prog>,
+    symbol: &'prog Rc<SymbolDevice>,
+    udev_device: UdevDevice,
+) -> OnlineDevice<'prog> {
+    OnlineDevice::new(
+        create_device(
+            &symbol.driver,
+            symbol.name.clone(),
+            udev_device,
+            context.dryrun,
+        ),
+        symbol,
+    )
+}
+
+enum DeviceState {
+    Offline(usize),
+    Online(usize),
+    UnknownDevice,
+    InvalidTags,
+}
+
+fn find_device_state(device: &UdevDevice, context: &mut RunContext) -> DeviceState {
+    guard!(let Some(tags) = udev_extract_tags(&device) else {
+    return DeviceState::InvalidTags;
+    });
+
+    let device_tags_text = tags.join(", ");
+    devev_debug!("Device tags: [{}]", &device_tags_text);
+
+    context
+        .online_devices
+        .iter()
+        .position(|online_device| {
+            tags.iter()
+                .any(|&device_tag| device_tag == online_device.symbol.tag)
+        })
+        .map(|index| DeviceState::Online(index))
+        .or_else(|| {
+            context
+                .offline_devices
+                .iter()
+                .position(|&offline_device| {
+                    tags.iter()
+                        .any(|&device_tag| device_tag == offline_device.tag)
+                })
+                .map(|index| DeviceState::Offline(index))
+        })
+        .unwrap_or(DeviceState::UnknownDevice)
+}
+
+fn process_device_event(context: &mut RunContext, event: Event) {
+    guard!(let Some(action) = event.action() else {
+    devev_debug!("Ignored event with no defined action");
+    return;
+    });
+
+    guard!(let Some(action) = action.to_str() else {
+    devev_debug!("Invalid action got: {:?}", event.action());
+    return;
+    });
+
+    let adding;
+    match action {
+        "add" => {
+            devev_debug!("Device added: {:?}.", event.devpath());
+            adding = true;
+        }
+
+        "remove" => {
+            devev_debug!("Device removed: {:?}.", event.devpath());
+            adding = false;
+        }
+
+        other_action => {
+            devev_debug!("Skipped action of type {}", other_action);
+            return;
+        }
+    }
+
+    let device_state = find_device_state(&event, context);
+
+    const UNEXPECTED_DEVICE_STATE_MSG: &'static str =
+        "This might be caused due to either the program didn't receive a \
+	 previous udev event for that device, or that your udev rules \
+	 are too general and are being triggered for multiple devices. \
+	 Please review your udev rules for ensuring this is not the case, \
+	 or issues may happen when attemtping to monitor or cool your system.";
+
+    match device_state {
+        DeviceState::Offline(index) => {
+            if adding {
+                // Device is being added, and is now offline, everything's ok.
+                let symbol = context.offline_devices.remove(index);
+                context.online_devices.push(create_online_device_for_symbol(
+                    &context,
+                    symbol,
+                    event.device(),
+                ));
+                devev_info!("Device {} plugged in at {:?}", symbol.name, event.devpath());
+            } else {
+                // Device is offline but there's an attempt of removing it again.
+                devev_error!(
+                    "Received an udev event for unregistering a non registered device. {}",
+                    UNEXPECTED_DEVICE_STATE_MSG
+                );
+                devev_error!("Offending device: {:?}", context.offline_devices[index]);
+            }
+        }
+        DeviceState::Online(index) => {
+            if adding {
+                // Device is online but there's an attempt of adding it again.
+                let device = &context.online_devices[index];
+                devev_error!(
+                    "Received an udev event for re-registering an already registered device. {}",
+                    UNEXPECTED_DEVICE_STATE_MSG
+                );
+                devev_error!(
+                    "Offending device: {:?}; {:?}",
+                    device.symbol,
+                    device.inner.as_ref()
+                );
+            } else {
+                let device = context.online_devices.remove(index);
+                context.offline_devices.push(device.symbol);
+                devev_info!("Device {} unplugged", device.name());
+            }
+        }
+        DeviceState::UnknownDevice => {} // Ignore
+        DeviceState::InvalidTags => {
+            devev_debug!("Device has invalid tags. Ignoring.");
+        }
+    }
+}
+
+fn poll_device_events(context: &mut RunContext, poller: &mut UdevPoller, mode: PollMode) {
+    for event in poller.poll_events(mode).unwrap() {
+        process_device_event(context, event);
+    }
+}
+
+#[derive(Debug, new)]
+struct OnlineDevice<'prog> {
+    inner: Box<dyn Device>,
+    symbol: &'prog Rc<SymbolDevice>,
+}
+
+impl Deref for OnlineDevice<'_> {
+    type Target = dyn Device;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref()
+    }
+}
+
+impl DerefMut for OnlineDevice<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut()
+    }
 }
 
 #[derive(new, Debug)]
@@ -66,13 +235,13 @@ impl<'prog> OnlineThermalRule<'prog> {
 
 #[derive(Debug)]
 struct OnlineSensor<'prog> {
-    device: &'prog Box<dyn Device>,
+    device: &'prog OnlineDevice<'prog>,
     symbol: &'prog SymbolSensor,
     _cached_value: RefCell<Option<TempCelsius>>,
 }
 
 impl<'prog> OnlineSensor<'prog> {
-    fn new(device: &'prog Box<dyn Device>, symbol: &'prog SymbolSensor) -> Self {
+    fn new(device: &'prog OnlineDevice<'prog>, symbol: &'prog SymbolSensor) -> Self {
         Self {
             device,
             symbol,
@@ -152,28 +321,32 @@ impl<'prog> From<&'prog SymbolOutput> for ComputedRuleOutputKey<'prog> {
 }
 
 #[derive(new, Debug)]
-struct RunContext {
-    pub thermal_program: cmodel::ThermalProgram,
-    pub online_devices: Vec<Box<dyn Device>>,
+struct RunContext<'prog> {
+    pub thermal_program: &'prog cmodel::ThermalProgram,
+    pub online_devices: Vec<OnlineDevice<'prog>>,
+    pub offline_devices: Vec<&'prog Rc<SymbolDevice>>,
+    pub dryrun: bool,
 }
 
-impl RunContext {
-    pub fn find_device<'prog>(&'prog self, name: &str) -> Option<&'prog Box<dyn Device>> {
+// TODO Create a better interface for adding or dropping new online devices, and
+// recalculating online rules.
+impl<'prog, 'this> RunContext<'prog>
+where
+    'prog: 'this,
+{
+    pub fn find_device(&'this self, name: &str) -> Option<&'this OnlineDevice<'prog>> {
         self.online_devices
             .iter()
             .find(|device| device.name() == name)
     }
 
-    pub fn find_device_mut<'prog>(
-        &'prog mut self,
-        name: &str,
-    ) -> Option<&'prog mut Box<dyn Device>> {
+    pub fn find_device_mut(&'this mut self, name: &str) -> Option<&'this mut OnlineDevice<'prog>> {
         self.online_devices
             .iter_mut()
             .find(|device| device.name() == name)
     }
 
-    pub fn get_online_rules<'prog>(&'prog self) -> Vec<OnlineThermalRule<'prog>> {
+    pub fn get_online_rules(&'this self) -> Vec<OnlineThermalRule<'this>> {
         self.thermal_program
             .rules
             .iter()
@@ -187,7 +360,7 @@ impl RunContext {
             .collect()
     }
 
-    pub fn register_device(&mut self, device: Box<dyn Device>) {
+    pub fn register_device(&mut self, device: OnlineDevice<'prog>) {
         if let Some(_) = self.find_device(device.name()) {
             panic!("Device already registered: {}", device.name())
         } else {
@@ -195,8 +368,8 @@ impl RunContext {
         }
     }
 
-    pub fn compute_rule_actions<'prog>(
-        &'prog self,
+    pub fn compute_rule_actions(
+        &'this self,
         online_rule: &'prog OnlineThermalRule,
     ) -> ComputedRule<'prog> {
         let when = online_rule.when;
@@ -356,11 +529,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 		.help("Defines the interval between each time the sensors and the rule are evaluated, in milliseconds.")
 		.default_value("1000")
 	)
+        .arg(
+	    Arg::with_name("discover-timeout")
+		.short("k")
+		.long("discover-timeout")
+		.help("Defines how much time should the program wait at most when starting to allow all devices to become full available, in seconds. A value of 0 will indicate that no wait will be performed.")
+		.default_value("30")
+	)
         .get_matches();
 
     let config_path = matches.value_of("config").unwrap();
     let dryrun = matches.is_present("dry-run");
     let interval = Duration::from_millis(clap::value_t_or_exit!(matches.value_of("interval"), u64));
+    let discover_timeout = Duration::from_secs(clap::value_t_or_exit!(
+        matches.value_of("discover-timeout"),
+        u64
+    ));
 
     info!("Initializing fan control...");
     let conf_program = config::conffile::ProgramParser::new()
@@ -372,34 +556,90 @@ fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => panic!("Configuration error: {}", e),
     };
 
-    let devices = program
+    let mut udev_poller = UdevPoller::poll_on(
+        MonitorBuilder::new()?
+            .match_subsystem("hidraw")?
+            .match_tag("my_mouse")?
+            .listen()?,
+    );
+
+    info!("Discovering devices...");
+
+    let mut context: RunContext = RunContext::new(&program, Vec::new(), Vec::new(), dryrun);
+
+    // TODO Multiple devices must not be identified by the same udev tag.
+    for device_symbol in program
         .symbol_table
         .get_all_symbols_of_type::<SymbolDevice>()
         .into_iter()
-        .filter_map(|device| match udev_find_with_tags(vec![&device.tag]) {
+    {
+        match udev_find_with_tags(vec![&device_symbol.tag]) {
             Some(udev_dev) => {
                 info!(
                     "Found device `{}` at {:?}",
-                    device.name,
+                    device_symbol.name,
                     &udev_dev.devpath()
                 );
-                let device = create_device(&device.driver, device.name.clone(), udev_dev, dryrun);
-                Some(device)
+
+                context.online_devices.push(create_online_device_for_symbol(
+                    &context,
+                    device_symbol,
+                    udev_dev,
+                ));
             }
 
             None => {
-                warn!(
-                    "Device not found: `{}`. Ignoring. (no device with udev tag '{}' found.)",
-                    device.name, device.tag
-                );
-                None
+                context.offline_devices.push(device_symbol);
             }
-        })
-        .collect::<Vec<Box<dyn Device>>>();
+        }
+    }
 
-    let context: RunContext = RunContext::new(program, devices);
+    if context.offline_devices.len() > 0 && !discover_timeout.is_zero() {
+        info!(
+            "Waiting until offline devices becomes visible... : [{}]",
+            context
+                .offline_devices
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
+        let start_time = Instant::now();
+        let mut elapsed;
+        while {
+            elapsed = start_time.elapsed();
+            elapsed
+        } < discover_timeout
+            && context.offline_devices.len() > 0
+        {
+            let remaining = discover_timeout - elapsed;
+            poll_device_events(
+                &mut context,
+                &mut udev_poller,
+                PollMode::WaitTimeout(remaining),
+            )
+        }
+    }
+
+    // TODO Change condition when hot-pluggable devices support is implemented.
+    if context.offline_devices.len() > 0 {
+        error!(
+            "Unable to find some required devices attached in the system: [{}]. Quitting NOW!",
+            context
+                .offline_devices
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
+        std::process::exit(1);
+    }
+
     loop {
         let start_time = Instant::now();
+        poll_device_events(&mut context, &mut udev_poller, PollMode::NoWait);
 
         let online_rules: Vec<OnlineThermalRule> = context.get_online_rules();
         let applying_rules: Vec<ComputedRule> = online_rules
