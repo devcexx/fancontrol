@@ -10,6 +10,7 @@ pub struct RuleDefineDevice {
     pub dev_name: String,
     pub udev_tag: String,
     pub driver_name: String,
+    pub allow_hotplug: bool,
 }
 
 #[derive(new, Debug, Clone)]

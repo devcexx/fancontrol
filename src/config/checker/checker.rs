@@ -16,7 +16,13 @@ fn process_define_rule(
             .insert(
                 device.dev_name.clone(),
                 Symbol::Device(
-                    SymbolDevice::new(device.dev_name, device.udev_tag, device.driver_name).into(),
+                    SymbolDevice::new(
+                        device.dev_name,
+                        device.udev_tag,
+                        device.driver_name,
+                        device.allow_hotplug,
+                    )
+                    .into(),
                 ),
             )
             .map_err(|err| err.into()),

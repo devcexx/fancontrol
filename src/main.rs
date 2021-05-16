@@ -1,5 +1,4 @@
 #![feature(associated_type_bounds)]
-#![feature(concat_idents)]
 #![feature(duration_zero)]
 
 #[macro_use]
@@ -40,6 +39,9 @@ extern crate lalrpop_util;
 
 targeted_log!("config::rule {}", rule_);
 targeted_log!("udev_events", devev_);
+
+const EXIT_CODE_GENERAL_ERROR: i32 = 1;
+const EXIT_CODE_HOT_UNPLUG: i32 = 2;
 
 fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
@@ -135,7 +137,7 @@ fn process_device_event(context: &mut RunContext, event: Event) {
 	 previous udev event for that device, or that your udev rules \
 	 are too general and are being triggered for multiple devices. \
 	 Please review your udev rules for ensuring this is not the case, \
-	 or issues may happen when attemtping to monitor or cool your system.";
+	 or issues may happen when attempting to monitor or cool your system.";
 
     match device_state {
         DeviceState::Offline(index) => {
@@ -368,6 +370,16 @@ where
         }
     }
 
+    fn filter_non_hotpluggable_offline_devices(&self) -> impl Iterator<Item = &&Rc<SymbolDevice>> {
+        self.offline_devices.iter().filter(|dev| !dev.allow_hotplug)
+    }
+
+    pub fn any_non_hotpluggable_device_offline(&self) -> bool {
+        self.filter_non_hotpluggable_offline_devices()
+            .next()
+            .is_some()
+    }
+
     pub fn compute_rule_actions(
         &'this self,
         online_rule: &'prog OnlineThermalRule,
@@ -594,7 +606,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if context.offline_devices.len() > 0 && !discover_timeout.is_zero() {
+    // TODO Avoid constant calculation of existing offline
+    // non-hotpluggable devices by... keeping track of them somehow?
+    if context.any_non_hotpluggable_device_offline() && !discover_timeout.is_zero() {
         info!(
             "Waiting until offline devices becomes visible... : [{}]",
             context
@@ -611,7 +625,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             elapsed = start_time.elapsed();
             elapsed
         } < discover_timeout
-            && context.offline_devices.len() > 0
+            && context.any_non_hotpluggable_device_offline()
         {
             let remaining = discover_timeout - elapsed;
             poll_device_events(
@@ -622,24 +636,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // TODO Change condition when hot-pluggable devices support is implemented.
-    if context.offline_devices.len() > 0 {
+    let remaining_mandatory_devs = context
+        .filter_non_hotpluggable_offline_devices()
+        .map(|dev| dev.name.as_ref())
+        .collect::<Vec<&str>>();
+    if remaining_mandatory_devs.len() > 0 {
         error!(
             "Unable to find some required devices attached in the system: [{}]. Quitting NOW!",
-            context
-                .offline_devices
-                .iter()
-                .map(|d| d.name.clone())
-                .collect::<Vec<String>>()
-                .join(", ")
+            remaining_mandatory_devs.join(", ")
         );
 
-        std::process::exit(1);
+        std::process::exit(EXIT_CODE_GENERAL_ERROR);
     }
 
     loop {
         let start_time = Instant::now();
         poll_device_events(&mut context, &mut udev_poller, PollMode::NoWait);
+        let offline_non_hotpluggable_devices = context
+            .filter_non_hotpluggable_offline_devices()
+            .map(|dev| dev.name.as_ref())
+            .collect::<Vec<_>>();
+        if !offline_non_hotpluggable_devices.is_empty() {
+            error!(
+                "One or more non hot-plugabble device has been removed: {}",
+                offline_non_hotpluggable_devices.join(", ")
+            );
+            std::process::exit(EXIT_CODE_HOT_UNPLUG);
+        }
 
         let online_rules: Vec<OnlineThermalRule> = context.get_online_rules();
         let applying_rules: Vec<ComputedRule> = online_rules

@@ -23,7 +23,7 @@ Tag: String = {
 }
 
 RuleDefine: ast::RuleDefine = {
-    "DEVICE" <Ident> "UDEV" "TAG" <LitStr> "DRIVER" <LitStr> => ast::RuleDefine::Device(ast::RuleDefineDevice::new(<>)),
+    "DEVICE" <devname:Ident> "UDEV" "TAG" <tag:LitStr> "DRIVER" <dri:LitStr> <hotplug:"ALLOW HOTPLUG"?> => ast::RuleDefine::Device(ast::RuleDefineDevice::new(devname, tag, dri, hotplug.is_some())),
     "SENSOR" <Ident> "DEVICE" <Ident> "TYPE" <SensorType> "INDEX" <Integer> => ast::RuleDefine::Sensor(ast::RuleDefineSensor::new(<>)),
     "OUTPUT" <name:Ident> "DEVICE" <dev:Ident> "TYPE" <t:OutputType> "INDEX" <index:Integer> <pri:OutputPriorization?> =>
         ast::RuleDefine::Output(ast::RuleDefineOutput::new(name, dev, t, index, pri.unwrap_or(ast::OutputPriorization::Latest)))

@@ -65,6 +65,7 @@ pub struct SymbolDevice {
     pub name: String,
     pub tag: String,
     pub driver: String,
+    pub allow_hotplug: bool,
 }
 
 #[derive(new, Debug)]
