@@ -1,0 +1,24 @@
+pkgname=fanctrl
+pkgver=0.1
+pkgrel=2
+pkgdesc=''
+arch=('i686' 'x86_64')
+url='http://github.com/devcexx/fancontrol'
+license=('GPL3')
+depends=('systemd')
+makedepends=('rustup' 'gcc' 'pkgconf')
+backup=('etc/fanctrl.conf')
+source=()
+install="fanctrl.install"
+
+build() {
+    mkdir -p "${pkgdirbase}"
+    chmod 700 "${pkgdirbase}"
+    (cd .. && rustup run --install nightly-2021-05-22 cargo build --release)
+}
+
+package() {
+    install -Dm755 "${startdir}"/../../target/release/fancontrol "${pkgdir}"/usr/bin/fanctrl
+    install -Dm755 "${startdir}"/../sample.conf "${pkgdir}"/etc/fanctrl.conf
+    install -Dm755 "${startdir}"/../fanctrl.service "${pkgdir}"/usr/lib/systemd/system/fanctrl.service
+}

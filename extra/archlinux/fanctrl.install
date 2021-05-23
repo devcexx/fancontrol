@@ -1,0 +1,3 @@
+echo "Fancontrol has been installed as a systemd service called 'fanctrl'."
+echo "Edit the /etc/fanctrl file for configuring the daemon."
+echo "Execute 'systemctl enable fanctrl.service' to enable this service to be started at boot."
