@@ -43,6 +43,8 @@ targeted_log!("udev_events", devev_);
 const EXIT_CODE_GENERAL_ERROR: i32 = 1;
 const EXIT_CODE_HOT_UNPLUG: i32 = 2;
 
+const UDEV_FANCONTROL_TAG: &str = "fancontrol";
+
 fn create_device(driver: &str, name: String, device: UdevDevice, dryrun: bool) -> Box<dyn Device> {
     // FIXME Unwrap
     let builder = driver_registry_find(driver).unwrap();
@@ -570,8 +572,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut udev_poller = UdevPoller::poll_on(
         MonitorBuilder::new()?
-            .match_subsystem("hidraw")?
-            .match_tag("my_mouse")?
+            .match_tag(UDEV_FANCONTROL_TAG)?
             .listen()?,
     );
 
